@@ -18,8 +18,11 @@ DallasTemperature sensors(&oneWire);
 namespace {
 constexpr uint32_t kGpsBaud = 9600;
 constexpr int8_t kGpsRxPin = 1;
+constexpr uint8_t kGpsLedPin = 2;
+constexpr uint8_t kTempLedPin = 3;
+constexpr uint8_t kWifiLedPin = 4;
 constexpr uint32_t kReportIntervalMs = 1000;
-constexpr uint32_t kBlinkIntervalMs = 100;
+constexpr uint32_t kServiceBlinkIntervalMs = 500;
 constexpr uint32_t kTemperatureSampleIntervalMs = 2000;
 constexpr uint32_t kTemperatureConversionMs = 750;
 constexpr uint32_t kWifiConnectTimeoutMs = 15000;
@@ -60,8 +63,12 @@ void WeatherStationApp::begin()
     Serial.print("Temp sensors found: ");
     Serial.println(sensors.getDeviceCount());
 
-    pinMode(LED_BUILTIN, OUTPUT);
-    digitalWrite(LED_BUILTIN, LOW);
+    pinMode(kGpsLedPin, OUTPUT);
+    pinMode(kTempLedPin, OUTPUT);
+    pinMode(kWifiLedPin, OUTPUT);
+    digitalWrite(kGpsLedPin, LOW);
+    digitalWrite(kTempLedPin, LOW);
+    digitalWrite(kWifiLedPin, LOW);
 
     loadWiFiCredentials();
     if (!tryConnectStation()) {
@@ -81,6 +88,7 @@ void WeatherStationApp::tick()
     reportWiFiStatusIfDue();
     updateHeartbeat();
     gps_.update();
+    updateServiceLeds();
     reportGpsIfDue();
 }
 
@@ -472,6 +480,7 @@ void WeatherStationApp::writeWifiSetupPage(WiFiClient &client)
 void WeatherStationApp::writeStatusPage(WiFiClient &client)
 {
     const GpsSnapshot snapshot = gps_.readSnapshot();
+    const bool wifiConnected = WiFi.status() == WL_CONNECTED;
 
     String location;
     if (snapshot.hasLocation) {
@@ -488,13 +497,25 @@ void WeatherStationApp::writeStatusPage(WiFiClient &client)
         temperature = "No reading yet";
     }
 
+    const String gpsLedStatus = snapshot.hasLocation ? "solid" : "blinking";
+    const String tempLedStatus = hasTemperature_ ? "solid" : "blinking";
+    String wifiLedStatus = "off";
+    if (wifiConnected) {
+        wifiLedStatus = "solid";
+    } else if (apModeEnabled_) {
+        wifiLedStatus = "blinking";
+    }
+
     writeHttpHeaders(client, "text/html; charset=utf-8");
     client.println("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
                    "<title>Weather Station Status</title>"
                    "<style>body{font-family:Verdana,sans-serif;background:#f2f9f3;color:#163;padding:1.5rem;}"
                    "main{max-width:560px;background:#fff;border-radius:12px;padding:1.25rem;box-shadow:0 10px 25px rgba(0,0,0,.08);}"
                    ".card{background:#eef7ee;padding:.8rem 1rem;border-radius:8px;margin:.8rem 0;}"
-                   "h2{margin:.2rem 0 .4rem;}small{color:#486;}</style></head><body><main><h1>Weather Station</h1>");
+                   "h2{margin:.2rem 0 .4rem;}small{color:#486;}"
+                   "table{width:100%;border-collapse:collapse;}th,td{text-align:left;padding:.45rem .35rem;border-bottom:1px solid #d8ead8;}"
+                   "th{font-size:.9rem;color:#2e5;}"
+                   "</style></head><body><main><h1>Weather Station</h1>");
     client.print("<small>Network: ");
     client.print(WiFi.SSID());
     client.print(" | IP: ");
@@ -506,6 +527,22 @@ void WeatherStationApp::writeStatusPage(WiFiClient &client)
     client.print("<div class='card'><h2>Temperature</h2><p>");
     client.print(temperature);
     client.println("</p></div>");
+    client.println("<div class='card'><h2>LED Status</h2><table><thead><tr><th>Name</th><th>Pin</th><th>Status</th></tr></thead><tbody>");
+    client.print("<tr><td>GPS</td><td>GPIO ");
+    client.print(kGpsLedPin);
+    client.print("</td><td>");
+    client.print(gpsLedStatus);
+    client.println("</td></tr>");
+    client.print("<tr><td>TEMP</td><td>GPIO ");
+    client.print(kTempLedPin);
+    client.print("</td><td>");
+    client.print(tempLedStatus);
+    client.println("</td></tr>");
+    client.print("<tr><td>WIFI</td><td>GPIO ");
+    client.print(kWifiLedPin);
+    client.print("</td><td>");
+    client.print(wifiLedStatus);
+    client.println("</td></tr></tbody></table></div>");
     client.println("</main></body></html>");
 }
 
@@ -596,10 +633,9 @@ void WeatherStationApp::updateHeartbeat()
 {
     const unsigned long now = millis();
 
-    if (now - lastBlinkMs_ >= kBlinkIntervalMs) {
-        lastBlinkMs_ = now;
-        ledOn_ = !ledOn_;
-        digitalWrite(LED_BUILTIN, ledOn_ ? HIGH : LOW);
+    if (now - lastServiceBlinkMs_ >= kServiceBlinkIntervalMs) {
+        lastServiceBlinkMs_ = now;
+        serviceBlinkOn_ = !serviceBlinkOn_;
     }
 
     if (temperatureConversionInProgress_ && (now - lastTemperatureRequestMs_) >= kTemperatureConversionMs) {
@@ -626,6 +662,25 @@ void WeatherStationApp::updateHeartbeat()
         sensors.requestTemperatures();
         temperatureConversionInProgress_ = true;
         lastTemperatureRequestMs_ = now;
+    }
+}
+
+void WeatherStationApp::updateServiceLeds()
+{
+    const GpsSnapshot gpsSnapshot = gps_.readSnapshot();
+    const bool gpsFixed = gpsSnapshot.hasLocation;
+    const bool tempReady = hasTemperature_;
+    const bool wifiConnected = WiFi.status() == WL_CONNECTED;
+
+    digitalWrite(kGpsLedPin, gpsFixed ? HIGH : (serviceBlinkOn_ ? HIGH : LOW));
+    digitalWrite(kTempLedPin, tempReady ? HIGH : (serviceBlinkOn_ ? HIGH : LOW));
+
+    if (wifiConnected) {
+        digitalWrite(kWifiLedPin, HIGH);
+    } else if (apModeEnabled_) {
+        digitalWrite(kWifiLedPin, serviceBlinkOn_ ? HIGH : LOW);
+    } else {
+        digitalWrite(kWifiLedPin, LOW);
     }
 }
 

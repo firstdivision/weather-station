@@ -11,6 +11,7 @@ public:
 
 private:
     void updateHeartbeat();
+    void updateServiceLeds();
     void reportGpsIfDue();
     void loadWiFiCredentials();
     void saveWiFiCredentials(const String &ssid, const String &password);
@@ -33,7 +34,6 @@ private:
 
     GpsReader gps_;
     unsigned long lastReportMs_ = 0;
-    unsigned long lastBlinkMs_ = 0;
     unsigned long lastWifiAttemptMs_ = 0;
     unsigned long lastWifiStatusMs_ = 0;
     bool apModeEnabled_ = false;
@@ -41,9 +41,10 @@ private:
     bool webServerRunning_ = false;
     bool hasTemperature_ = false;
     bool temperatureConversionInProgress_ = false;
-    bool ledOn_ = false;
+    bool serviceBlinkOn_ = false;
     unsigned long lastTemperatureRequestMs_ = 0;
     unsigned long lastTemperatureReadMs_ = 0;
+    unsigned long lastServiceBlinkMs_ = 0;
     float lastTempC_ = 0.0f;
     char wifiSsid_[33] = {0};
     char wifiPassword_[65] = {0};
